@@ -17,13 +17,14 @@ contract DeployScript is Script {
     string constant WORD_LIST_URI = "ipfs://QmWaw2pGNQJqQmyWTeoaAJcMygUdSj69Dxq8v422HjmPBa";
 
     function run() external {
+        address owner = vm.envAddress("DEPLOYER_ADDRESS");
         address resolver = vm.envAddress("RESOLVER_ADDRESS");
 
-        vm.startBroadcast();
+        vm.startBroadcast(owner);
 
         WordCirclesEscrow escrow = new WordCirclesEscrow();
-        WordCircleStats stats = new WordCircleStats(msg.sender, resolver);
-        WordCommitment commitment = new WordCommitment(msg.sender, resolver, WORD_LIST_HASH, WORD_LIST_URI);
+        WordCircleStats stats = new WordCircleStats(owner, resolver);
+        WordCommitment commitment = new WordCommitment(owner, resolver, WORD_LIST_HASH, WORD_LIST_URI);
 
         vm.stopBroadcast();
 
@@ -31,6 +32,6 @@ contract DeployScript is Script {
         console.log("Stats:      ", address(stats));
         console.log("Commitment: ", address(commitment));
         console.log("Resolver:   ", resolver);
-        console.log("Owner:      ", msg.sender);
+        console.log("Owner:      ", owner);
     }
 }
