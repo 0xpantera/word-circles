@@ -20,6 +20,7 @@ RESOLVER_ACCOUNT ?= resolver
 
 DEPLOYER_ADDRESS := $(shell cast wallet address --account $(DEPLOYER_ACCOUNT) 2>/dev/null)
 RESOLVER_ADDRESS := $(shell cast wallet address --account $(RESOLVER_ACCOUNT) 2>/dev/null)
+VERIFY_FLAG      := $(if $(GNOSISSCAN_API_KEY),--verify,)
 
 .PHONY: deploy verify-all
 
@@ -29,7 +30,7 @@ deploy:
 	forge script script/Deploy.s.sol:DeployScript \
 		--rpc-url $(RPC_URL) \
 		--account $(DEPLOYER_ACCOUNT) \
-		--broadcast
+		--broadcast $(VERIFY_FLAG)
 
 verify-all:
 	@echo "Verifying contracts on Gnosisscan..."
