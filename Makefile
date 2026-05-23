@@ -1,12 +1,17 @@
 # Contract deployment and verification for Gnosis chain.
 #
-# Required env vars:
-#   RESOLVER_ADDRESS    — resolver wallet address (derived from RESOLVER_PRIVATE_KEY)
+# Deploy:
 #   DEPLOYER_PRIVATE_KEY — private key for the deployer (owner) account
-#   RPC_URL             — Gnosis RPC endpoint
+#   RESOLVER_ADDRESS     — resolver wallet address (derived from RESOLVER_PRIVATE_KEY)
+#   RPC_URL              — Gnosis RPC endpoint
 #
-# Optional:
-#   GNOSISSCAN_API_KEY  — for contract verification on Gnosisscan
+# Verify (after deployment):
+#   GNOSISSCAN_API_KEY   — API key from gnosisscan.io
+#   DEPLOYER_ADDRESS     — deployer wallet address (owner of Stats + Commitment)
+#   RESOLVER_ADDRESS     — resolver wallet address
+#   ESCROW_ADDRESS       — deployed WordCirclesEscrow address
+#   STATS_ADDRESS        — deployed WordCircleStats address
+#   COMMITMENT_ADDRESS   — deployed WordCommitment address
 
 .PHONY: deploy verify-all
 
@@ -14,8 +19,7 @@ deploy:
 	forge script script/Deploy.s.sol:DeployScript \
 		--rpc-url $(RPC_URL) \
 		--private-key $(DEPLOYER_PRIVATE_KEY) \
-		--broadcast \
-		--verify
+		--broadcast
 
 verify-all:
 	@echo "Verifying contracts on Gnosisscan..."
