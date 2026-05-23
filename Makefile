@@ -1,20 +1,25 @@
 # Contract deployment and verification for Gnosis chain.
 #
+# Setup (one-time):
+#   cast wallet import deployer --interactive
+#   cast wallet import resolver --interactive
+#
 # Create a .env file with:
-#   DEPLOYER_PRIVATE_KEY — private key for the deployer (owner) account
-#   RESOLVER_PRIVATE_KEY — private key for the resolver (backend) wallet
-#   RPC_URL              — Gnosis RPC endpoint
+#   RPC_URL             — Gnosis RPC endpoint
 #
 # Verify (after deployment, add to .env):
-#   GNOSISSCAN_API_KEY   — API key from gnosisscan.io
-#   ESCROW_ADDRESS       — deployed WordCirclesEscrow address
-#   STATS_ADDRESS        — deployed WordCircleStats address
-#   COMMITMENT_ADDRESS   — deployed WordCommitment address
+#   GNOSISSCAN_API_KEY  — API key from gnosisscan.io
+#   ESCROW_ADDRESS      — deployed WordCirclesEscrow address
+#   STATS_ADDRESS       — deployed WordCircleStats address
+#   COMMITMENT_ADDRESS  — deployed WordCommitment address
 
 -include .env
 
-DEPLOYER_ADDRESS  := $(shell cast wallet address $(DEPLOYER_PRIVATE_KEY) 2>/dev/null)
-RESOLVER_ADDRESS  := $(shell cast wallet address $(RESOLVER_PRIVATE_KEY) 2>/dev/null)
+DEPLOYER_ACCOUNT ?= deployer
+RESOLVER_ACCOUNT ?= resolver
+
+DEPLOYER_ADDRESS := $(shell cast wallet address --account $(DEPLOYER_ACCOUNT) 2>/dev/null)
+RESOLVER_ADDRESS := $(shell cast wallet address --account $(RESOLVER_ACCOUNT) 2>/dev/null)
 
 .PHONY: deploy verify-all
 
@@ -23,7 +28,7 @@ deploy:
 	@echo "Resolver:  $(RESOLVER_ADDRESS)"
 	forge script script/Deploy.s.sol:DeployScript \
 		--rpc-url $(RPC_URL) \
-		--private-key $(DEPLOYER_PRIVATE_KEY) \
+		--account $(DEPLOYER_ACCOUNT) \
 		--broadcast
 
 verify-all:
