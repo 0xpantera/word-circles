@@ -27,7 +27,7 @@ VERIFY_FLAG      := $(if $(GNOSISSCAN_API_KEY),--verify,)
 deploy:
 	@echo "Deployer:  $(DEPLOYER_ADDRESS)"
 	@echo "Resolver:  $(RESOLVER_ADDRESS)"
-	forge script script/Deploy.s.sol:DeployScript \
+	RESOLVER_ADDRESS=$(RESOLVER_ADDRESS) forge script script/Deploy.s.sol:DeployScript \
 		--rpc-url $(RPC_URL) \
 		--account $(DEPLOYER_ACCOUNT) \
 		--broadcast $(VERIFY_FLAG)
