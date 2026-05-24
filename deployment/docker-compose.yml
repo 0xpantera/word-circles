@@ -21,14 +21,15 @@ services:
       - indexer
 
   indexer:
-    image: ghcr.io/bh2smith/arak:main
+    build:
+      context: indexer
+      dockerfile: Dockerfile
     restart: unless-stopped
     entrypoint: ["/usr/bin/tini", "--"]
     command: ["/opt/arak/arak"]
     working_dir: /data
     volumes:
       - data:/data
-      - ./arak.toml:/data/arak.toml:ro
 
 volumes:
   data: {}
