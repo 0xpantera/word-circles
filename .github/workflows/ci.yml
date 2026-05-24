@@ -36,6 +36,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
       - name: Format check
         run: cargo fmt --check
 
