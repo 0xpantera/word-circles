@@ -3,7 +3,9 @@ use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 use word_circles_backend::build_router;
 use word_circles_backend::chain::ResolverClient;
+use word_circles_backend::db::repository::GameRepository;
 use word_circles_backend::db::sqlite::SqliteRepository;
+use word_circles_backend::dune;
 use word_circles_backend::indexer;
 use word_circles_backend::settlement;
 
@@ -14,11 +16,17 @@ async fn main() {
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
+
     let port = std::env::var("PORT").unwrap_or_else(|_| "3001".into());
     let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "word-circles.db".into());
     let addr = format!("0.0.0.0:{port}");
 
     let repo = SqliteRepository::new(&db_path).expect("Failed to initialize database");
+
+    if let Ok(query_id) = std::env::var("DUNE_QUERY_ID") {
+        let query_id: u32 = query_id.parse().expect("DUNE_QUERY_ID must be a number");
+        run_bootstrap(&repo, query_id).await;
+    }
 
     let pvp_enabled = std::env::var("PVP_ENABLED")
         .map(|v| v == "true" || v == "1")
@@ -104,4 +112,57 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     println!("Backend listening on {addr}");
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn run_bootstrap(repo: &SqliteRepository, query_id: u32) {
+    tracing::info!(
+        query_id,
+        "Bootstrap: fetching GameRecorded events from Dune"
+    );
+
+    let events = match dune::fetch_game_recorded_events(query_id).await {
+        Ok(events) => events,
+        Err(e) => {
+            tracing::error!("Bootstrap failed: {e}");
+            return;
+        }
+    };
+
+    tracing::info!(count = events.len(), "Bootstrap: fetched records from Dune");
+
+    let mut backfilled = 0u64;
+    let mut max_block: u64 = 0;
+
+    for event in &events {
+        indexer::backfill_game_result(
+            repo,
+            event.game_id as u32,
+            &event.player,
+            event.won,
+            event.guesses as u8,
+        )
+        .await;
+        backfilled += 1;
+        if event.block_number > max_block {
+            max_block = event.block_number;
+        }
+    }
+
+    if max_block > 0 {
+        let current_cursor = repo.get_indexer_cursor().await.unwrap_or(0);
+        if max_block > current_cursor {
+            repo.set_indexer_cursor(max_block)
+                .await
+                .expect("Failed to set indexer cursor");
+            tracing::info!(block = max_block, "Bootstrap: indexer cursor set");
+        } else {
+            tracing::info!(
+                current_cursor,
+                max_block,
+                "Bootstrap: cursor already ahead, not updating"
+            );
+        }
+    }
+
+    tracing::info!(backfilled, max_block, "Bootstrap complete");
 }
