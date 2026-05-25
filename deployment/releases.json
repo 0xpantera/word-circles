@@ -4,5 +4,17 @@
     "uploadedTo": {
       "dappnode": "Thu, 21 May 2026 17:26:04 GMT"
     }
+  },
+  "0.2.0": {
+    "hash": "/ipfs/Qmb6KLbhnhxfdRMkT3rHkakX2qqeaoJBZVyz1uwjTia3BS",
+    "uploadedTo": {
+      "dappnode": "Sun, 24 May 2026 10:39:08 GMT"
+    }
+  },
+  "0.3.0": {
+    "hash": "/ipfs/QmPXJaJnDs1AY4wfj8vTJLTpc6gqRzwEVf8uPD1vyzwazY",
+    "uploadedTo": {
+      "dappnode": "Mon, 25 May 2026 04:13:13 GMT"
+    }
   }
 }
