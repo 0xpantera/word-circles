@@ -2,12 +2,12 @@ version: "3.8"
 
 services:
   postgres:
-    image: postgres:16
+    build:
+      context: db
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      POSTGRES_USER: wordcircles
       POSTGRES_PASSWORD: wordcircles
-      POSTGRES_DB: wordcircles
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
