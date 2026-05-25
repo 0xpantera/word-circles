@@ -153,7 +153,7 @@ impl GameRepository for SqliteRepository {
 
     async fn get_or_create_player(&self, address: &str) -> Result<PlayerRecord, RepositoryError> {
         let conn = self.conn.clone();
-        let address = address.to_string();
+        let address = address.to_lowercase();
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             conn.execute(
@@ -373,7 +373,7 @@ impl GameRepository for SqliteRepository {
     ) -> Result<(), RepositoryError> {
         let conn = self.conn.clone();
         let game_id = game_id.to_string();
-        let address = address.to_string();
+        let address = address.to_lowercase();
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock().unwrap();
             conn.execute(
