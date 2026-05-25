@@ -1,14 +1,15 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use sqlx::PgPool;
 use tower::ServiceExt;
 use word_circles_backend::build_router;
 use word_circles_backend::db::models::GameRecord;
+use word_circles_backend::db::postgres::PostgresRepository;
 use word_circles_backend::db::repository::GameRepository;
-use word_circles_backend::db::sqlite::SqliteRepository;
 
-fn app() -> axum::Router {
-    let repo = SqliteRepository::new(":memory:").unwrap();
+fn app(pool: PgPool) -> axum::Router {
+    let repo = PostgresRepository::from_pool(pool);
     build_router(repo, None, None)
 }
 
@@ -17,9 +18,9 @@ async fn json_body(resp: axum::response::Response) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-#[tokio::test]
-async fn health_check() {
-    let resp = app()
+#[sqlx::test(migrations = "./migrations")]
+async fn health_check(pool: PgPool) {
+    let resp = app(pool)
         .oneshot(Request::get("/health").body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -29,10 +30,10 @@ async fn health_check() {
     assert_eq!(&bytes[..], b"ok");
 }
 
-#[tokio::test]
-async fn get_game_returns_game_id() {
+#[sqlx::test(migrations = "./migrations")]
+async fn get_game_returns_game_id(pool: PgPool) {
     let body = json_body(
-        app()
+        app(pool)
             .oneshot(Request::get("/api/game").body(Body::empty()).unwrap())
             .await
             .unwrap(),
@@ -42,9 +43,9 @@ async fn get_game_returns_game_id() {
     assert!(body["gameId"].is_number());
 }
 
-#[tokio::test]
-async fn get_game_is_idempotent() {
-    let app = app();
+#[sqlx::test(migrations = "./migrations")]
+async fn get_game_is_idempotent(pool: PgPool) {
+    let app = app(pool);
 
     let body1 = json_body(
         app.clone()
@@ -94,9 +95,9 @@ fn guess_request_with_player(
         .unwrap()
 }
 
-#[tokio::test]
-async fn valid_guess_returns_results() {
-    let app = app();
+#[sqlx::test(migrations = "./migrations")]
+async fn valid_guess_returns_results(pool: PgPool) {
+    let app = app(pool);
 
     let game_body = json_body(
         app.clone()
@@ -121,36 +122,42 @@ async fn valid_guess_returns_results() {
     assert!(body["gameOver"].is_boolean());
 }
 
-#[tokio::test]
-async fn invalid_word_returns_400() {
-    let resp = app().oneshot(guess_request(1, "zzzzz", 0)).await.unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn invalid_word_returns_400(pool: PgPool) {
+    let resp = app(pool)
+        .oneshot(guess_request(1, "zzzzz", 0))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
     let body = json_body(resp).await;
     assert_eq!(body["error"], "Not in word list");
 }
 
-#[tokio::test]
-async fn too_short_returns_400() {
-    let resp = app().oneshot(guess_request(1, "hi", 0)).await.unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn too_short_returns_400(pool: PgPool) {
+    let resp = app(pool).oneshot(guess_request(1, "hi", 0)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
     let body = json_body(resp).await;
     assert_eq!(body["error"], "Guess must be 5 letters");
 }
 
-#[tokio::test]
-async fn guess_number_out_of_range_returns_400() {
-    let resp = app().oneshot(guess_request(1, "crane", 6)).await.unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn guess_number_out_of_range_returns_400(pool: PgPool) {
+    let resp = app(pool)
+        .oneshot(guess_request(1, "crane", 6))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
     let body = json_body(resp).await;
     assert_eq!(body["error"], "Invalid guess number");
 }
 
-#[tokio::test]
-async fn guess_with_player_persists() {
-    let app = app();
+#[sqlx::test(migrations = "./migrations")]
+async fn guess_with_player_persists(pool: PgPool) {
+    let app = app(pool);
 
     let game_body = json_body(
         app.clone()
@@ -162,7 +169,12 @@ async fn guess_with_player_persists() {
     let game_id = game_body["gameId"].as_u64().unwrap();
 
     let resp = app
-        .oneshot(guess_request_with_player(game_id, "slate", 0, "0xtest"))
+        .oneshot(guess_request_with_player(
+            game_id,
+            "slate",
+            0,
+            "0xcccccccccccccccccccccccccccccccccccccccc",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -172,18 +184,21 @@ async fn guess_with_player_persists() {
     assert!(body["results"].is_array());
 }
 
-#[tokio::test]
-async fn uppercase_guess_is_normalized() {
-    let resp = app().oneshot(guess_request(1, "CRANE", 0)).await.unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn uppercase_guess_is_normalized(pool: PgPool) {
+    let resp = app(pool)
+        .oneshot(guess_request(1, "CRANE", 0))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let body = json_body(resp).await;
     assert_eq!(body["guess"], "crane");
 }
 
-#[tokio::test]
-async fn last_guess_reveals_answer() {
-    let app = app();
+#[sqlx::test(migrations = "./migrations")]
+async fn last_guess_reveals_answer(pool: PgPool) {
+    let app = app(pool);
 
     let game_body = json_body(
         app.clone()
@@ -205,9 +220,9 @@ async fn last_guess_reveals_answer() {
     assert!(body["answer"].is_string());
 }
 
-#[tokio::test]
-async fn leaderboard_empty() {
-    let resp = app()
+#[sqlx::test(migrations = "./migrations")]
+async fn leaderboard_empty(pool: PgPool) {
+    let resp = app(pool)
         .oneshot(
             Request::get("/api/leaderboard")
                 .body(Body::empty())
@@ -221,9 +236,9 @@ async fn leaderboard_empty() {
     assert!(body.as_array().unwrap().is_empty());
 }
 
-#[tokio::test]
-async fn leaderboard_with_player_data() {
-    let app = app();
+#[sqlx::test(migrations = "./migrations")]
+async fn leaderboard_with_player_data(pool: PgPool) {
+    let app = app(pool);
 
     let game_body = json_body(
         app.clone()
@@ -235,7 +250,12 @@ async fn leaderboard_with_player_data() {
     let game_id = game_body["gameId"].as_u64().unwrap();
 
     app.clone()
-        .oneshot(guess_request_with_player(game_id, "crane", 0, "0xplayer1"))
+        .oneshot(guess_request_with_player(
+            game_id,
+            "crane",
+            0,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ))
         .await
         .unwrap();
 
@@ -252,13 +272,16 @@ async fn leaderboard_with_player_data() {
     let body = json_body(resp).await;
     let entries = body.as_array().unwrap();
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0]["address"], "0xplayer1");
+    assert_eq!(
+        entries[0]["address"],
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
     assert_eq!(entries[0]["games_played"], 1);
 }
 
-#[tokio::test]
-async fn daily_leaderboard_empty() {
-    let resp = app()
+#[sqlx::test(migrations = "./migrations")]
+async fn daily_leaderboard_empty(pool: PgPool) {
+    let resp = app(pool)
         .oneshot(
             Request::get("/api/leaderboard/daily?gameId=999")
                 .body(Body::empty())
@@ -272,20 +295,20 @@ async fn daily_leaderboard_empty() {
     assert!(body.as_array().unwrap().is_empty());
 }
 
-#[tokio::test]
-async fn config_without_resolver() {
-    let resp = app()
+#[sqlx::test(migrations = "./migrations")]
+async fn config_without_resolver(pool: PgPool) {
+    let resp = app(pool)
         .oneshot(Request::get("/api/config").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
-#[tokio::test]
-async fn config_with_resolver() {
+#[sqlx::test(migrations = "./migrations")]
+async fn config_with_resolver(pool: PgPool) {
     use word_circles_backend::chain::ContractConfig;
 
-    let repo = SqliteRepository::new(":memory:").unwrap();
+    let repo = PostgresRepository::from_pool(pool);
     let config = ContractConfig {
         resolver: "0x1234567890abcdef1234567890abcdef12345678".into(),
         commitment_address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd".into(),
@@ -313,11 +336,11 @@ async fn config_with_resolver() {
     assert_eq!(body["pvpEnabled"], false);
 }
 
-#[tokio::test]
-async fn config_with_pvp_enabled() {
+#[sqlx::test(migrations = "./migrations")]
+async fn config_with_pvp_enabled(pool: PgPool) {
     use word_circles_backend::chain::ContractConfig;
 
-    let repo = SqliteRepository::new(":memory:").unwrap();
+    let repo = PostgresRepository::from_pool(pool);
     let config = ContractConfig {
         resolver: "0x1234567890abcdef1234567890abcdef12345678".into(),
         commitment_address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd".into(),
@@ -336,9 +359,9 @@ async fn config_with_pvp_enabled() {
     assert_eq!(body["pvpEnabled"], true);
 }
 
-#[tokio::test]
-async fn daily_leaderboard_with_results() {
-    let app = app();
+#[sqlx::test(migrations = "./migrations")]
+async fn daily_leaderboard_with_results(pool: PgPool) {
+    let app = app(pool);
 
     let game_body = json_body(
         app.clone()
@@ -350,7 +373,12 @@ async fn daily_leaderboard_with_results() {
     let game_id = game_body["gameId"].as_u64().unwrap();
 
     app.clone()
-        .oneshot(guess_request_with_player(game_id, "crane", 0, "0xdaily1"))
+        .oneshot(guess_request_with_player(
+            game_id,
+            "crane",
+            0,
+            "0xdddddddddddddddddddddddddddddddddddddddd",
+        ))
         .await
         .unwrap();
 
@@ -367,18 +395,21 @@ async fn daily_leaderboard_with_results() {
     let body = json_body(resp).await;
     let results = body.as_array().unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["address"], "0xdaily1");
+    assert_eq!(
+        results[0]["address"],
+        "0xdddddddddddddddddddddddddddddddddddddddd"
+    );
     assert_eq!(results[0]["guesses"], 1);
 }
 
 // --- PvP tests ---
 
-async fn setup_pvp_game(repo: &SqliteRepository) -> String {
+async fn setup_pvp_game(repo: &PostgresRepository) -> String {
     let game_id = "0xdeadbeef00000000000000000000000000000000000000000000000000000001";
     let game = GameRecord {
         id: game_id.into(),
         game_type: "pvp".into(),
-        word_index: 0, // "aback" (first answer)
+        word_index: 0,
         salt: Some("aa".repeat(32)),
         commitment: Some("bb".repeat(32)),
         status: "active".into(),
@@ -390,12 +421,18 @@ async fn setup_pvp_game(repo: &SqliteRepository) -> String {
     };
     repo.create_game(&game).await.unwrap();
 
-    let p1 = repo.get_or_create_player("0xplayer1").await.unwrap();
-    let p2 = repo.get_or_create_player("0xplayer2").await.unwrap();
-    repo.add_game_player(game_id, p1.id, "0xplayer1")
+    let p1 = repo
+        .get_or_create_player("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         .await
         .unwrap();
-    repo.add_game_player(game_id, p2.id, "0xplayer2")
+    let p2 = repo
+        .get_or_create_player("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        .await
+        .unwrap();
+    repo.add_game_player(game_id, p1.id, "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        .await
+        .unwrap();
+    repo.add_game_player(game_id, p2.id, "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         .await
         .unwrap();
 
@@ -415,9 +452,9 @@ fn pvp_guess(game_id: &str, guess: &str, guess_number: u32, player: &str) -> Req
         .unwrap()
 }
 
-#[tokio::test]
-async fn pvp_game_status() {
-    let repo = SqliteRepository::new(":memory:").unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn pvp_game_status(pool: PgPool) {
+    let repo = PostgresRepository::from_pool(pool.clone());
     let game_id = setup_pvp_game(&repo).await;
     let app = build_router(repo, None, None);
 
@@ -440,9 +477,9 @@ async fn pvp_game_status() {
     assert!(body["answer"].is_null());
 }
 
-#[tokio::test]
-async fn pvp_game_not_found() {
-    let app = app();
+#[sqlx::test(migrations = "./migrations")]
+async fn pvp_game_not_found(pool: PgPool) {
+    let app = app(pool);
     let resp = app
         .oneshot(
             Request::get("/api/games/0xnonexistent")
@@ -454,9 +491,9 @@ async fn pvp_game_not_found() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
-async fn pvp_guess_requires_player() {
-    let repo = SqliteRepository::new(":memory:").unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn pvp_guess_requires_player(pool: PgPool) {
+    let repo = PostgresRepository::from_pool(pool.clone());
     let game_id = setup_pvp_game(&repo).await;
     let app = build_router(repo, None, None);
 
@@ -480,28 +517,38 @@ async fn pvp_guess_requires_player() {
     assert_eq!(body["error"], "Player address required for PvP");
 }
 
-#[tokio::test]
-async fn pvp_guess_rejects_non_player() {
-    let repo = SqliteRepository::new(":memory:").unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn pvp_guess_rejects_non_player(pool: PgPool) {
+    let repo = PostgresRepository::from_pool(pool.clone());
     let game_id = setup_pvp_game(&repo).await;
     let app = build_router(repo, None, None);
 
     let resp = app
-        .oneshot(pvp_guess(&game_id, "crane", 0, "0xstranger"))
+        .oneshot(pvp_guess(
+            &game_id,
+            "crane",
+            0,
+            "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
-#[tokio::test]
-async fn pvp_guess_starts_timer_and_records() {
-    let repo = SqliteRepository::new(":memory:").unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn pvp_guess_starts_timer_and_records(pool: PgPool) {
+    let repo = PostgresRepository::from_pool(pool.clone());
     let game_id = setup_pvp_game(&repo).await;
     let app = build_router(repo, None, None);
 
     let resp = app
         .clone()
-        .oneshot(pvp_guess(&game_id, "crane", 0, "0xplayer1"))
+        .oneshot(pvp_guess(
+            &game_id,
+            "crane",
+            0,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -509,9 +556,8 @@ async fn pvp_guess_starts_timer_and_records() {
     let body = json_body(resp).await;
     assert_eq!(body["guess"], "crane");
     assert!(body["results"].is_array());
-    assert!(body["answer"].is_null()); // PvP never reveals answer mid-game
+    assert!(body["answer"].is_null());
 
-    // Check game status shows player as "playing"
     let status_resp = app
         .oneshot(
             Request::get(&format!("/api/games/{game_id}"))
@@ -524,21 +570,25 @@ async fn pvp_guess_starts_timer_and_records() {
     let players = status["players"].as_array().unwrap();
     let p1 = players
         .iter()
-        .find(|p| p["address"] == "0xplayer1")
+        .find(|p| p["address"] == "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         .unwrap();
     assert_eq!(p1["status"], "playing");
 }
 
-#[tokio::test]
-async fn pvp_guess_marks_finished_on_last_guess() {
-    let repo = SqliteRepository::new(":memory:").unwrap();
+#[sqlx::test(migrations = "./migrations")]
+async fn pvp_guess_marks_finished_on_last_guess(pool: PgPool) {
+    let repo = PostgresRepository::from_pool(pool.clone());
     let game_id = setup_pvp_game(&repo).await;
     let app = build_router(repo, None, None);
 
-    // Submit final guess (guess_number=5 is the 6th guess)
     let resp = app
         .clone()
-        .oneshot(pvp_guess(&game_id, "crane", 5, "0xplayer1"))
+        .oneshot(pvp_guess(
+            &game_id,
+            "crane",
+            5,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -546,7 +596,6 @@ async fn pvp_guess_marks_finished_on_last_guess() {
     let body = json_body(resp).await;
     assert!(body["gameOver"].as_bool().unwrap());
 
-    // Check player is finished
     let status_resp = app
         .oneshot(
             Request::get(&format!("/api/games/{game_id}"))
@@ -559,7 +608,7 @@ async fn pvp_guess_marks_finished_on_last_guess() {
     let players = status["players"].as_array().unwrap();
     let p1 = players
         .iter()
-        .find(|p| p["address"] == "0xplayer1")
+        .find(|p| p["address"] == "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         .unwrap();
     assert_eq!(p1["status"], "finished");
 }
