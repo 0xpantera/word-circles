@@ -29,6 +29,10 @@ interface StatsModalProps {
   canRecord?: boolean;
   recordState?: RecordState;
   onRecordScore?: () => void;
+  /** Invite-driven new wallets attributed to the player; shows a "Refs" tile. */
+  referrals?: number;
+  /** When provided, renders a "Share invite" button (wallet connected in app). */
+  onShare?: () => void;
 }
 
 export default function StatsModal({
@@ -41,6 +45,8 @@ export default function StatsModal({
   canRecord,
   recordState = "idle",
   onRecordScore,
+  referrals,
+  onShare,
 }: StatsModalProps) {
   if (!open) return null;
 
@@ -80,7 +86,11 @@ export default function StatsModal({
           Statistics
         </h2>
 
-        <div className="grid grid-cols-4 gap-2 text-center mb-6">
+        <div
+          className={`grid ${
+            referrals !== undefined ? "grid-cols-5" : "grid-cols-4"
+          } gap-2 text-center mb-6`}
+        >
           <div>
             <p className="text-2xl font-bold">{stats.gamesPlayed}</p>
             <p className="text-xs text-neutral-400">Played</p>
@@ -97,6 +107,12 @@ export default function StatsModal({
             <p className="text-2xl font-bold">{stats.maxStreak}</p>
             <p className="text-xs text-neutral-400">Max</p>
           </div>
+          {referrals !== undefined && (
+            <div>
+              <p className="text-2xl font-bold">{referrals}</p>
+              <p className="text-xs text-neutral-400">Refs</p>
+            </div>
+          )}
         </div>
 
         <h3 className="text-sm font-bold uppercase tracking-wider mb-2">
@@ -118,36 +134,49 @@ export default function StatsModal({
           ))}
         </div>
 
-        {showRecord && (
+        <div className="mt-6 space-y-2">
+          {showRecord && (
+            <button
+              onClick={onRecordScore}
+              disabled={
+                recordState === "recording" || recordState === "recorded"
+              }
+              className={`w-full py-2 rounded font-bold transition-colors disabled:cursor-not-allowed ${
+                recordState === "recorded"
+                  ? "bg-neutral-700 text-neutral-300"
+                  : "bg-green-600 hover:bg-green-700 disabled:opacity-60"
+              }`}
+            >
+              {recordState === "recording"
+                ? "Recording…"
+                : recordState === "recorded"
+                  ? "Score Recorded ✓"
+                  : recordState === "error"
+                    ? "Recording failed — Retry"
+                    : "Record Score"}
+            </button>
+          )}
+
+          {onShare && (
+            <button
+              onClick={onShare}
+              className="w-full py-2 rounded font-bold bg-indigo-600 hover:bg-indigo-700 transition-colors"
+            >
+              Share invite
+            </button>
+          )}
+
           <button
-            onClick={onRecordScore}
-            disabled={recordState === "recording" || recordState === "recorded"}
-            className={`mt-6 w-full py-2 rounded font-bold transition-colors disabled:cursor-not-allowed ${
-              recordState === "recorded"
-                ? "bg-neutral-700 text-neutral-300"
-                : "bg-green-600 hover:bg-green-700 disabled:opacity-60"
+            onClick={onClose}
+            className={`w-full py-2 rounded font-bold transition-colors ${
+              showRecord || onShare
+                ? "bg-neutral-700 hover:bg-neutral-600"
+                : "bg-green-600 hover:bg-green-700"
             }`}
           >
-            {recordState === "recording"
-              ? "Recording…"
-              : recordState === "recorded"
-                ? "Score Recorded ✓"
-                : recordState === "error"
-                  ? "Recording failed — Retry"
-                  : "Record Score"}
+            Close
           </button>
-        )}
-
-        <button
-          onClick={onClose}
-          className={`w-full py-2 rounded font-bold transition-colors ${
-            showRecord
-              ? "mt-2 bg-neutral-700 hover:bg-neutral-600"
-              : "mt-6 bg-green-600 hover:bg-green-700"
-          }`}
-        >
-          Close
-        </button>
+        </div>
       </div>
     </div>
   );

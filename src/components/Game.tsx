@@ -18,6 +18,8 @@ import {
   getConnectedAddress,
   subscribeWallet,
   CIRCLES_MINIAPP_URL,
+  buildInviteUrl,
+  getReferralCount,
 } from "@/lib/circles";
 import {
   STATS_CONTRACT,
@@ -80,6 +82,7 @@ export default function Game() {
   const [recordState, setRecordState] = useState<
     "idle" | "recording" | "recorded" | "error"
   >("idle");
+  const [referrals, setReferrals] = useState<number | undefined>(undefined);
 
   // Load game state, fetch current game ID, and subscribe to wallet
   useEffect(() => {
@@ -110,6 +113,38 @@ export default function Game() {
 
     return unsubscribe;
   }, []);
+
+  // Refresh the referral count each time the stats modal opens with a wallet
+  // connected inside the miniapp (the only context where invites are shareable).
+  useEffect(() => {
+    if (!showStats || !isMiniappMode() || !walletAddress) return;
+    let active = true;
+    getReferralCount(walletAddress).then((c) => {
+      if (active) setReferrals(c);
+    });
+    return () => {
+      active = false;
+    };
+  }, [showStats, walletAddress]);
+
+  const shareInvite = useCallback(() => {
+    if (!walletAddress) return;
+    const url = buildInviteUrl(walletAddress);
+    if (typeof navigator !== "undefined" && navigator.share) {
+      navigator
+        .share({
+          title: "Word Circles",
+          text: "Play Word Circles with me!",
+          url,
+        })
+        .catch(() => {});
+    } else {
+      navigator.clipboard?.writeText(url).then(
+        () => setToast("Invite link copied"),
+        () => {},
+      );
+    }
+  }, [walletAddress]);
 
   // Check contract for duplicate play when wallet and gameId are available
   useEffect(() => {
@@ -450,6 +485,8 @@ export default function Game() {
           recordState === "idle" && alreadyPlayed ? "recorded" : recordState
         }
         onRecordScore={handleRecordScore}
+        referrals={referrals}
+        onShare={isMiniappMode() && walletAddress ? shareInvite : undefined}
       />
 
       {/* Leaderboard Modal */}

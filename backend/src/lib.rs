@@ -69,6 +69,12 @@ struct ErrorResponse {
 struct EventRequest {
     wallet: String,
     kind: String,
+    /// Optional referrer (0x address) carried on the first `miniapp_open` of a
+    /// new wallet. When present and valid, the server attributes the invitee to
+    /// the referrer atomically with the event write (Criterion 4). Best-effort:
+    /// a malformed value is ignored rather than failing the event.
+    #[serde(default)]
+    referrer: Option<String>,
 }
 
 #[utoipa::path(
@@ -805,11 +811,64 @@ async fn post_event<R: GameRepository>(
     if req.kind.is_empty() || req.kind.len() > 32 {
         return err_response(StatusCode::BAD_REQUEST, "invalid kind").into_response();
     }
-    match state.repo.record_event(normalized, &req.kind).await {
+    // Referrer is best-effort: only forward it when well-formed so a bad value
+    // can't panic decode_address or fail the telemetry write. A self-referral is
+    // dropped server-side too (the repo guard also rejects it).
+    let referrer = req
+        .referrer
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| is_valid_address(r) && !r.eq_ignore_ascii_case(normalized));
+    match state
+        .repo
+        .record_event(normalized, &req.kind, referrer)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => {
             error!("record_event failed: {e}");
             err_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize, IntoParams)]
+struct ReferralCountQuery {
+    /// Referrer address (0x-prefixed) to count attributed invitees for.
+    address: String,
+}
+
+#[derive(Serialize, ToSchema)]
+struct ReferralCountResponse {
+    count: u64,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/referrals/count",
+    params(ReferralCountQuery),
+    responses(
+        (status = 200, description = "Referral count for an address", body = ReferralCountResponse),
+        (status = 400, description = "Invalid address", body = ErrorResponse),
+        (status = 500, description = "Internal error", body = ErrorResponse),
+    )
+)]
+async fn get_referral_count<R: GameRepository>(
+    State(state): State<Arc<AppState<R>>>,
+    Query(q): Query<ReferralCountQuery>,
+) -> impl IntoResponse {
+    debug!(address = %q.address, "GET /api/referrals/count");
+    if !is_valid_address(&q.address) {
+        return err_response(StatusCode::BAD_REQUEST, "invalid address");
+    }
+    match state.repo.count_referrals(&q.address).await {
+        Ok(count) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(ReferralCountResponse { count }).unwrap()),
+        ),
+        Err(e) => {
+            error!("count_referrals failed: {e}");
+            err_response(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
         }
     }
 }
@@ -826,6 +885,7 @@ async fn post_event<R: GameRepository>(
         get_game,
         post_guess,
         post_event,
+        get_referral_count,
         get_leaderboard,
         get_daily_leaderboard,
         get_pvp_game,
@@ -837,6 +897,7 @@ async fn post_event<R: GameRepository>(
         GuessRequest,
         GuessResponse,
         EventRequest,
+        ReferralCountResponse,
         ErrorResponse,
         game::LetterResult,
         ContractConfig,
@@ -873,6 +934,7 @@ pub fn build_router<R: GameRepository>(
         )
         .route("/api/guess", post(post_guess::<R>))
         .route("/api/event", post(post_event::<R>))
+        .route("/api/referrals/count", get(get_referral_count::<R>))
         .route("/api/leaderboard", get(get_leaderboard::<R>))
         .route("/api/leaderboard/daily", get(get_daily_leaderboard::<R>))
         .with_state(state)

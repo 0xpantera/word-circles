@@ -571,15 +571,74 @@ impl GameRepository for PostgresRepository {
             .collect())
     }
 
-    async fn record_event(&self, wallet: &str, kind: &str) -> Result<(), RepositoryError> {
+    async fn record_event(
+        &self,
+        wallet: &str,
+        kind: &str,
+        referrer: Option<&str>,
+    ) -> Result<(), RepositoryError> {
         let wallet_bytes = decode_address(wallet);
+
+        let Some(referrer) = referrer else {
+            sqlx::query("INSERT INTO events (wallet, kind) VALUES ($1, $2)")
+                .bind(&wallet_bytes)
+                .bind(kind)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| RepositoryError::Internal(e.to_string()))?;
+            return Ok(());
+        };
+
+        // Attribution + event in one transaction. The referral insert runs first
+        // so its "invitee has no prior events" guard sees the state before this
+        // session's event row exists. The guard also requires the invitee to be
+        // wholly new (no event/player/referral) and the referrer to be a known
+        // wallet; ON CONFLICT makes a concurrent double-connect idempotent.
+        let referrer_bytes = decode_address(referrer);
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| RepositoryError::Internal(e.to_string()))?;
+
+        sqlx::query(
+            "INSERT INTO referrals (invitee, referrer)
+             SELECT $1, $2
+             WHERE NOT EXISTS (SELECT 1 FROM events    WHERE wallet  = $1)
+               AND NOT EXISTS (SELECT 1 FROM players   WHERE address = $1)
+               AND NOT EXISTS (SELECT 1 FROM referrals WHERE invitee = $1)
+               AND $1 <> $2
+               AND (EXISTS (SELECT 1 FROM events  WHERE wallet  = $2)
+                 OR EXISTS (SELECT 1 FROM players WHERE address = $2))
+             ON CONFLICT (invitee) DO NOTHING",
+        )
+        .bind(&wallet_bytes)
+        .bind(&referrer_bytes)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| RepositoryError::Internal(e.to_string()))?;
+
         sqlx::query("INSERT INTO events (wallet, kind) VALUES ($1, $2)")
             .bind(&wallet_bytes)
             .bind(kind)
-            .execute(&self.pool)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| RepositoryError::Internal(e.to_string()))?;
+
+        tx.commit()
             .await
             .map_err(|e| RepositoryError::Internal(e.to_string()))?;
         Ok(())
+    }
+
+    async fn count_referrals(&self, referrer: &str) -> Result<u64, RepositoryError> {
+        let referrer_bytes = decode_address(referrer);
+        let row: (i64,) = sqlx::query_as("SELECT count(*) FROM referrals WHERE referrer = $1")
+            .bind(&referrer_bytes)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::Internal(e.to_string()))?;
+        Ok(row.0 as u64)
     }
 }
 
@@ -970,5 +1029,119 @@ mod tests {
         let repo = PostgresRepository::from_pool(pool);
         assert!(repo.get_leaderboard(50, 0).await.unwrap().is_empty());
         assert!(repo.get_daily_results("1").await.unwrap().is_empty());
+    }
+
+    const REFERRER: &str = "0x1111111111111111111111111111111111111111";
+    const INVITEE: &str = "0x2222222222222222222222222222222222222222";
+
+    async fn total_events(pool: &PgPool) -> i64 {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM events")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn total_referrals(pool: &PgPool) -> i64 {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM referrals")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn event_without_referrer_writes_no_referral(pool: PgPool) {
+        let repo = PostgresRepository::from_pool(pool.clone());
+        repo.record_event(INVITEE, "miniapp_open", None)
+            .await
+            .unwrap();
+        assert_eq!(total_events(&pool).await, 1);
+        assert_eq!(total_referrals(&pool).await, 0);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn attribution_success(pool: PgPool) {
+        let repo = PostgresRepository::from_pool(pool.clone());
+        // Referrer becomes a known wallet by opening the app first.
+        repo.record_event(REFERRER, "miniapp_open", None)
+            .await
+            .unwrap();
+        // Fresh invitee arrives via the referrer's link.
+        repo.record_event(INVITEE, "miniapp_open", Some(REFERRER))
+            .await
+            .unwrap();
+        assert_eq!(total_referrals(&pool).await, 1);
+        assert_eq!(repo.count_referrals(REFERRER).await.unwrap(), 1);
+        // The session event is still written alongside the attribution.
+        assert_eq!(total_events(&pool).await, 2);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn attribution_rejected_for_returning_invitee(pool: PgPool) {
+        let repo = PostgresRepository::from_pool(pool.clone());
+        repo.record_event(REFERRER, "miniapp_open", None)
+            .await
+            .unwrap();
+        // Invitee already has a prior event — not a "new wallet".
+        repo.record_event(INVITEE, "miniapp_open", None)
+            .await
+            .unwrap();
+        repo.record_event(INVITEE, "miniapp_open", Some(REFERRER))
+            .await
+            .unwrap();
+        assert_eq!(total_referrals(&pool).await, 0);
+        // Event still recorded despite the rejected attribution.
+        assert_eq!(total_events(&pool).await, 3);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn attribution_idempotent_for_already_referred(pool: PgPool) {
+        let repo = PostgresRepository::from_pool(pool.clone());
+        let other = "0x3333333333333333333333333333333333333333";
+        repo.record_event(REFERRER, "miniapp_open", None)
+            .await
+            .unwrap();
+        repo.record_event(other, "miniapp_open", None)
+            .await
+            .unwrap();
+        repo.record_event(INVITEE, "miniapp_open", Some(REFERRER))
+            .await
+            .unwrap();
+        // A second link (different referrer) must not re-attribute the invitee.
+        repo.record_event(INVITEE, "miniapp_open", Some(other))
+            .await
+            .unwrap();
+        assert_eq!(total_referrals(&pool).await, 1);
+        assert_eq!(repo.count_referrals(REFERRER).await.unwrap(), 1);
+        assert_eq!(repo.count_referrals(other).await.unwrap(), 0);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn self_referral_rejected(pool: PgPool) {
+        let repo = PostgresRepository::from_pool(pool.clone());
+        repo.record_event(REFERRER, "miniapp_open", None)
+            .await
+            .unwrap();
+        repo.record_event(INVITEE, "miniapp_open", Some(INVITEE))
+            .await
+            .unwrap();
+        assert_eq!(total_referrals(&pool).await, 0);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn unknown_referrer_rejected(pool: PgPool) {
+        let repo = PostgresRepository::from_pool(pool.clone());
+        // REFERRER has never used the app, so it can't be credited.
+        repo.record_event(INVITEE, "miniapp_open", Some(REFERRER))
+            .await
+            .unwrap();
+        assert_eq!(total_referrals(&pool).await, 0);
+        // The invitee's own session event is still recorded.
+        assert_eq!(total_events(&pool).await, 1);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn count_referrals_zero_for_unknown(pool: PgPool) {
+        let repo = PostgresRepository::from_pool(pool);
+        assert_eq!(repo.count_referrals(REFERRER).await.unwrap(), 0);
     }
 }

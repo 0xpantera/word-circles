@@ -19,6 +19,7 @@ import {
   joinPvpGame,
   NoCirclesError,
   CIRCLES_MINIAPP_URL,
+  buildInviteUrl,
 } from "@/lib/circles";
 import { encodeApprove, encodeJoin } from "@/lib/contract";
 import type {
@@ -377,6 +378,25 @@ export default function PvpGame() {
     setSolved(false);
   }, [clearSaved]);
 
+  const shareInvite = useCallback(() => {
+    if (!walletAddress) return;
+    const url = buildInviteUrl(walletAddress);
+    if (typeof navigator !== "undefined" && navigator.share) {
+      navigator
+        .share({
+          title: "Word Circles",
+          text: "Play Word Circles with me!",
+          url,
+        })
+        .catch(() => {});
+    } else {
+      navigator.clipboard?.writeText(url).then(
+        () => setToast("Invite link copied"),
+        () => {},
+      );
+    }
+  }, [walletAddress]);
+
   // --- Rendering ---------------------------------------------------------
 
   const title = (
@@ -531,6 +551,7 @@ export default function PvpGame() {
         transcript={transcript}
         myAddress={walletAddress}
         onPlayAgain={resetToLobby}
+        onShare={isMiniappMode() ? shareInvite : undefined}
       />
     );
   }

@@ -137,9 +137,24 @@ pub trait GameRepository: Send + Sync + 'static {
 
     /// Append a telemetry event. `wallet` is a hex address string, `kind` is a
     /// short label like "miniapp_open". Used to measure weekly active wallets.
+    ///
+    /// When `referrer` is `Some`, the event is written together with a guarded
+    /// referral attribution in a single transaction (Criterion 4): the invitee
+    /// is credited to the referrer iff this is the invitee's very first event
+    /// (never seen as event/player/referral) and the referrer is a known wallet.
+    /// The attribution insert runs before the event insert so the "no prior
+    /// events" guard sees the pre-insert state.
     fn record_event(
         &self,
         wallet: &str,
         kind: &str,
+        referrer: Option<&str>,
     ) -> impl Future<Output = Result<(), RepositoryError>> + Send;
+
+    /// Number of invitees attributed to `referrer` (hex address). Lifetime count;
+    /// `referrals.created_at` allows cycle-scoping later if needed.
+    fn count_referrals(
+        &self,
+        referrer: &str,
+    ) -> impl Future<Output = Result<u64, RepositoryError>> + Send;
 }

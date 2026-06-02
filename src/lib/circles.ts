@@ -2,6 +2,7 @@
 
 import {
   isMiniappMode,
+  onAppData,
   onWalletChange,
   sendTransactions,
   type Transaction,
@@ -33,12 +34,20 @@ const listeners: Set<WalletListener> = new Set();
 let currentAddress: string | null = null;
 let initialized = false;
 let sessionReported = false;
+// Referrer forwarded by the Circles host via ?data= (see buildInviteUrl). The
+// host posts app_data during the handshake, before the wallet propagates, so
+// this is set by the time we report the first session.
+let stashedReferrer: string | null = null;
 
-function reportMiniappSession(wallet: string) {
+function reportMiniappSession(wallet: string, referrer?: string) {
   fetch("/api/event", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wallet, kind: "miniapp_open" }),
+    body: JSON.stringify({
+      wallet,
+      kind: "miniapp_open",
+      ...(referrer ? { referrer } : {}),
+    }),
     keepalive: true,
   }).catch(() => {});
 }
@@ -49,6 +58,14 @@ export function initCircles() {
 
   if (!isMiniappMode()) return;
 
+  onAppData((data: string) => {
+    try {
+      stashedReferrer = getAddress(data);
+    } catch {
+      // malformed ?data= — ignore, treat the session as unreferred
+    }
+  });
+
   onWalletChange((address: string | null) => {
     try {
       currentAddress = address ? getAddress(address) : null;
@@ -57,10 +74,37 @@ export function initCircles() {
     }
     if (currentAddress && !sessionReported) {
       sessionReported = true;
-      reportMiniappSession(currentAddress);
+      // The referrer (if any) rides along on the session event; the server
+      // attributes atomically and drops self-referrals.
+      const referrer =
+        stashedReferrer && stashedReferrer !== currentAddress
+          ? stashedReferrer
+          : undefined;
+      reportMiniappSession(currentAddress, referrer);
     }
     listeners.forEach((fn) => fn(currentAddress));
   });
+}
+
+// Invite URL handed to other players: the Circles host forwards everything after
+// ?data= to the embedded app via onAppData, so we stash the referrer there.
+export function buildInviteUrl(referrer: string): string {
+  return `${CIRCLES_MINIAPP_URL}?data=${referrer}`;
+}
+
+// Number of invite-driven new wallets attributed to `address`. Best-effort:
+// returns 0 on any error so the stats tile degrades gracefully.
+export async function getReferralCount(address: string): Promise<number> {
+  try {
+    const res = await fetch(
+      `/api/referrals/count?address=${encodeURIComponent(address)}`,
+    );
+    if (!res.ok) return 0;
+    const body: { count?: number } = await res.json();
+    return body.count ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function subscribeWallet(fn: WalletListener): () => void {

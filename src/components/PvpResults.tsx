@@ -82,10 +82,13 @@ export default function PvpResults({
   transcript,
   myAddress,
   onPlayAgain,
+  onShare,
 }: {
   transcript: PvpTranscript;
   myAddress: string;
   onPlayAgain: () => void;
+  /** When provided and the player won, renders a "Share invite" button. */
+  onShare?: () => void;
 }) {
   const me =
     transcript.players.find(
@@ -126,12 +129,22 @@ export default function PvpResults({
         )}
       </div>
 
-      <button
-        onClick={onPlayAgain}
-        className="px-6 py-2.5 rounded-lg bg-green-600 font-bold hover:bg-green-500 transition-colors"
-      >
-        Play Again
-      </button>
+      <div className="flex gap-3">
+        <button
+          onClick={onPlayAgain}
+          className="px-6 py-2.5 rounded-lg bg-green-600 font-bold hover:bg-green-500 transition-colors"
+        >
+          Play Again
+        </button>
+        {onShare && result === "won" && (
+          <button
+            onClick={onShare}
+            className="px-6 py-2.5 rounded-lg bg-indigo-600 font-bold hover:bg-indigo-500 transition-colors"
+          >
+            Share invite
+          </button>
+        )}
+      </div>
     </div>
   );
 }

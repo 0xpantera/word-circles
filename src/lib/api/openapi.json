@@ -419,6 +419,55 @@
         }
       }
     },
+    "/api/referrals/count": {
+      "get": {
+        "tags": [],
+        "operationId": "get_referral_count",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "query",
+            "description": "Referrer address (0x-prefixed) to count attributed invitees for.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Referral count for an address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReferralCountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [],
@@ -544,6 +593,13 @@
         "properties": {
           "kind": {
             "type": "string"
+          },
+          "referrer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional referrer (0x address) carried on the first `miniapp_open` of a\nnew wallet. When present and valid, the server attributes the invitee to\nthe referrer atomically with the event write (Criterion 4). Best-effort:\na malformed value is ignored rather than failing the event."
           },
           "wallet": {
             "type": "string"
@@ -792,6 +848,19 @@
           },
           "solved": {
             "type": "boolean"
+          }
+        }
+      },
+      "ReferralCountResponse": {
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       }

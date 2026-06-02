@@ -148,6 +148,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/referrals/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_referral_count"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -200,6 +216,13 @@ export interface components {
         };
         EventRequest: {
             kind: string;
+            /**
+             * @description Optional referrer (0x address) carried on the first `miniapp_open` of a
+             *     new wallet. When present and valid, the server attributes the invitee to
+             *     the referrer atomically with the event write (Criterion 4). Best-effort:
+             *     a malformed value is ignored rather than failing the event.
+             */
+            referrer?: string | null;
             wallet: string;
         };
         GameResponse: {
@@ -264,6 +287,10 @@ export interface components {
             guessCount: number;
             guesses: components["schemas"]["PvpTranscriptGuess"][];
             solved: boolean;
+        };
+        ReferralCountResponse: {
+            /** Format: int64 */
+            count: number;
         };
     };
     responses: never;
@@ -598,6 +625,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailyResult"][];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_referral_count: {
+        parameters: {
+            query: {
+                /** @description Referrer address (0x-prefixed) to count attributed invitees for. */
+                address: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Referral count for an address */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferralCountResponse"];
+                };
+            };
+            /** @description Invalid address */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Internal error */
