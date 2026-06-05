@@ -22,7 +22,7 @@ import {
   NoCirclesError,
   CIRCLES_MINIAPP_URL,
 } from "@/lib/circles";
-import { encodeApprove, encodeJoin } from "@/lib/contract";
+import { encodeApprove, encodeJoin, isPlayerInOpenGame } from "@/lib/contract";
 import { FRONTEND_PVP_ENABLED } from "@/lib/usePvpEnabled";
 import type {
   LobbyConfig,
@@ -40,6 +40,7 @@ const LOBBY_KEY = "wordcircle-pvp-lobby";
 // we discover the assigned gameId from the backend, then poll until the game
 // fills and the resolver commits the word (status -> "active").
 type Phase =
+  | "preparing" // waiting for a just-left game to fill before re-joining
   | "submitting" // approve + join sent, awaiting wallet
   | "discovering" // looking up the assigned gameId
   | "waiting" // joined, waiting for an opponent
@@ -231,6 +232,56 @@ export default function PvpGame() {
       const stake = BigInt(amount);
       const approveData = encodeApprove(escrowAddress, stake);
       const joinData = encodeJoin(resolver, token, stake, capacity);
+
+      // A join() reverts with PlayerAlreadyJoined while we're still seated in
+      // this lobby's current open game (the on-chain gameId is deterministic and
+      // only rolls over once the lobby fills). Ask the chain directly rather
+      // than relying on in-memory "just played" state, so the guard survives a
+      // page refresh. Read failures degrade to "not seated" so a transient RPC
+      // hiccup never blocks a legitimate join.
+      const seatedInOpenGame = async (): Promise<boolean> => {
+        try {
+          return await isPlayerInOpenGame(
+            escrowAddress,
+            resolver,
+            token,
+            stake,
+            capacity,
+            walletAddress,
+          );
+        } catch {
+          return false;
+        }
+      };
+
+      if (await seatedInOpenGame()) {
+        if (!selectedLobby.botFunded) {
+          // No bot backstop to fill the game, so it could sit solo indefinitely
+          // — don't spin; send the player back to the lobby.
+          setToast(
+            "You're still in a game in this lobby. It'll settle on its own — try another lobby or check back in a moment.",
+          );
+          setPhase(null);
+          return;
+        }
+        // Bot-funded: an opponent joins within seconds, advancing the on-chain
+        // counter so the next join creates a fresh game instead of reverting.
+        // Wait for that before sending the transaction.
+        setPhase("preparing");
+        const startedAt = Date.now();
+        while (await seatedInOpenGame()) {
+          if (Date.now() - startedAt > 20_000) {
+            setToast(
+              "Your previous game is still waiting to fill. Give it a moment, then try again.",
+            );
+            setPhase(null);
+            return;
+          }
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        setPhase("submitting");
+      }
+
       const before = await fetchActiveGames(walletAddress);
       beforeIdsRef.current = new Set(before.map((g) => g.gameId));
       // Remember this lobby for next time before the (slow) wallet round-trip.
@@ -270,17 +321,21 @@ export default function PvpGame() {
     const tick = async () => {
       const games = await fetchActiveGames(walletAddress);
       if (!active) return;
+      // Only accept a genuinely NEW game (one we weren't already in before this
+      // join). Falling back to games[0] would latch onto a still-active prior
+      // game the player just left — e.g. a solo, never-settling game on a
+      // non-bot lobby — and render its "finished" status on a cleared board.
+      // If the new game hasn't been indexed yet, keep polling until it appears.
       const fresh = games.find((g) => !beforeIdsRef.current.has(g.gameId));
-      const chosen = fresh ?? games[0];
-      if (chosen) {
-        setGameId(chosen.gameId);
-        setGame(chosen);
+      if (fresh) {
+        setGameId(fresh.gameId);
+        setGame(fresh);
         // "open" (word committed, lobby not yet full) is already playable, so go
         // straight into the room; the "waiting for opponent" state is shown as a
         // banner over the board rather than a blocking screen. Hold the first
         // guess briefly so an opponent still has a chance to join.
-        armGrace(chosen.status);
-        setPhase(isPlayable(chosen.status) ? "playing" : "waiting");
+        armGrace(fresh.status);
+        setPhase(isPlayable(fresh.status) ? "playing" : "waiting");
       } else if (Date.now() - startedAt > 60_000) {
         setToast("Couldn't find your game yet — it may still be pending.");
         setPhase(null);
@@ -572,6 +627,18 @@ export default function PvpGame() {
         >
           Find Match
         </button>
+        {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+      </div>
+    );
+  }
+
+  if (phase === "preparing") {
+    return (
+      <div className="flex flex-col items-center gap-4 text-white px-4 text-center">
+        {Header}
+        <p className="text-neutral-400 animate-pulse">
+          Starting your next game…
+        </p>
         {toast && <Toast message={toast} onDone={() => setToast(null)} />}
       </div>
     );
