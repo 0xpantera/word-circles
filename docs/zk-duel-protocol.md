@@ -1,9 +1,10 @@
 # ZK Wordle Duel — Protocol & Contract Spec
 
-**Status:** design / spec (no code yet). Target: Gnosis Chain (id 100), Solidity
-^0.8.24, Foundry. Builds on the completed ZK spike (`circuits/`,
+**Status:** implemented prototype / testnet-prep. Target: Gnosis Chain (id 100),
+Solidity ^0.8.24, Foundry. See `docs/zk-duel-deploy.md` for the deployment and
+real-device runbook. Builds on the completed ZK spike (`circuits/`,
 `contracts/zk/WordleVerifier.sol`, PR #186) — cryptographic feasibility is
-already proven (GO). This doc designs the **game protocol + contracts** around
+already proven (GO). This doc describes the **game protocol + contracts** around
 that verifier.
 
 A fully **trustless, chain-only** two-player duel: each player commits their own
@@ -22,13 +23,13 @@ guard, deterministic ids) in a fresh contract, not the resolver paradigm.
 ## The verifier we wire in
 
 `contracts/zk/WordleVerifier.sol` → `HonkVerifier.verify(bytes proof, bytes32[]
-publicInputs) returns (bool)` (view). Circuit public inputs (8, ordered):
-`[commitment, dictionary_root, guess0..guess4, feedback]`. `feedback` is packed
-base-4 (5 tiles, LSB-first; absent=0, present=1, correct=2). **`feedback == 682`
-means solved** (all five correct: `2·(1+4+16+64+256)`). The proof binds the
-feedback to the committed word, so the contract supplies `guess`/`commitment`/
-`dictionary_root` from storage and the SNARK forces `feedback` to be the true
-score.
+publicInputs) returns (bool)` (view). Circuit public inputs (9, ordered):
+`[commitment, dictionary_root, match_binding, guess0..guess4, feedback]`.
+`feedback` is packed base-4 (5 tiles, LSB-first; absent=0, present=1,
+correct=2). **`feedback == 682` means solved** (all five correct:
+`2·(1+4+16+64+256)`). The proof binds the feedback to the committed word and
+match, so the contract supplies `guess`/`commitment`/`dictionary_root`/`matchId`
+from storage and the SNARK forces `feedback` to be the true score.
 
 ---
 
@@ -56,15 +57,14 @@ Why independent tracks over global strict-alternation:
 from `solved`/`guessCount`/deadlines, not a global enum). Resolution is always an
 explicit call, never implicit.
 
-| From   | Call                                         | Effect                                                                                                                                                                                                                                   |
-| ------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| —      | `createMatch(commitmentA, stake)`            | Status=Open; escrow stake A; `createDeadline = now + JOIN_WINDOW`. `dictRoot` is an immutable constant (§5), not a parameter.                                                                                                            |
-| Open   | `cancelMatch(id)` (A, after JOIN_WINDOW)     | refund A; Cancelled.                                                                                                                                                                                                                     |
-| Open   | `joinMatch(id, commitmentB)`                 | escrow stake B; Status=Active.                                                                                                                                                                                                           |
-| Active | `submitGuess(id, guess[5])`                  | guesser posts plaintext guess; requires no outstanding guess on their track; range-check each letter `< 26` (**mandatory** — else feedback is unprovable and bricks the track); `feedbackDeadline = now + MOVE_TIMEOUT`; `guessCount++`. |
-| Active | `submitFeedback(id, track, feedback, proof)` | word-owner answers pending guess; verify; record feedback, update green/orange tallies; if `682` set `solved`+`solvedAtGuess`; clear deadline.                                                                                           |
-| Active | `settle(id)`                                 | once a terminal condition holds; apply tiebreak; pay out; Settled.                                                                                                                                                                       |
-| Active | `claimTimeout(id, track)`                    | if a track's `feedbackDeadline` passed with a pending guess → that track's **guesser wins pot by forfeit** (or tiebreak if both tracks timed out — §4).                                                                                  |
+| From   | Call                                     | Effect                                                                                                                                                                                                                                   |
+| ------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| —      | `createMatch(nonce, commitmentA, stake)` | Status=Open; escrow stake A; `createDeadline = now + JOIN_WINDOW`. `dictRoot` is an immutable constant (§5), not a parameter.                                                                                                            |
+| Open   | `cancelMatch(id)` (A, after JOIN_WINDOW) | refund A; Cancelled.                                                                                                                                                                                                                     |
+| Open   | `joinMatch(id, commitmentB)`             | escrow stake B; Status=Active.                                                                                                                                                                                                           |
+| Active | `submitGuess(id, guess[5])`              | guesser posts plaintext guess; requires no outstanding guess on their track; range-check each letter `< 26` (**mandatory** — else feedback is unprovable and bricks the track); `feedbackDeadline = now + MOVE_TIMEOUT`; `guessCount++`. |
+| Active | `submitFeedback(id, feedback, proof)`    | word-owner answers their opponent's pending guess; verify; record feedback, update green/orange tallies; if `682` set `solved`+`solvedAtGuess`; clear deadline.                                                                          |
+| Active | `settle(id)`                             | Once a terminal condition holds, including feedback timeouts; apply tiebreak/forfeit rules; credit pull-payment balances; Settled.                                                                                                       |
 
 ## 3. Storage layout (gas-lean)
 
@@ -80,7 +80,7 @@ struct Track {            // indexed by GUESSER
     bool    solved;
     bool    pendingGuess;
     uint8[5] guess;       // current pending plaintext guess
-    uint64  feedbackDeadline;
+    uint64  deadline;     // owner clock when pendingGuess, else guesser clock
 }
 struct Match {
     address playerA; address playerB; address token;
@@ -105,14 +105,14 @@ Two per-action timers; **no whole-game wall clock** (exploitable + unnecessary
 with independent tracks). There is deliberately **no timeout on the guesser** — a
 guesser who stops simply stops improving, so stalling never helps the staller.
 
-| Vector                                     | Mitigation                                                                                                                                                                                                                                     |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Losing owner refuses to prove feedback** | After `feedbackDeadline`, **anyone** calls `claimTimeout(id, track)` → that track's **guesser wins the whole pot by forfeit.** Refusing to answer = guaranteed total loss, strictly worse than answering honestly. This is the core deterrent. |
-| **Abandons after seeing they lose**        | Manifests as (a) not answering → above (guesser wins), or (b) not guessing further → harmless (opponent wins on own completion/timeout). Abandonment ⇒ loss either way.                                                                        |
-| **No second player**                       | After `JOIN_WINDOW`, `cancelMatch` refunds A fully (no rake on a never-started match).                                                                                                                                                         |
-| **Mutual stall (both tracks expired)**     | `claimTimeout` first checks if the _other_ track is also expired+pending; if yes → it's a symmetric no-progress draw → **refund each their stake** (not "first poker wins"), removing any front-run incentive.                                 |
-| **One races ahead while other offline**    | Fine — finishing your track still requires the opponent to finish / exhaust / time out before `settle`. No shared turn token, no deadlock.                                                                                                     |
-| **Gas / who pokes**                        | `settle`/`claimTimeout` are **permissionless** (beneficiary pokes); Gnosis gas is sub-cent so no keeper economics. Acting players pay their own `submitGuess`/`submitFeedback`.                                                                |
+| Vector                                     | Mitigation                                                                                                                                                                                                                        |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Losing owner refuses to prove feedback** | After `feedbackDeadline`, **anyone** calls `settle(id)` → that track's **guesser wins the whole pot by forfeit.** Refusing to answer = guaranteed total loss, strictly worse than answering honestly. This is the core deterrent. |
+| **Abandons after seeing they lose**        | Manifests as (a) not answering → above (guesser wins), or (b) not guessing further → harmless (opponent wins on own completion/timeout). Abandonment ⇒ loss either way.                                                           |
+| **No second player**                       | After `JOIN_WINDOW`, `cancelMatch` refunds A fully (no rake on a never-started match).                                                                                                                                            |
+| **Mutual stall (both tracks expired)**     | `settle` first checks if both tracks are expired+pending; if yes → it's a symmetric no-progress draw → **refund each their stake** (not "first poker wins"), removing any front-run incentive.                                    |
+| **One races ahead while other offline**    | Fine — finishing your track still requires the opponent to finish / exhaust / time out before `settle`. No shared turn token, no deadlock.                                                                                        |
+| **Gas / who pokes**                        | `settle` is **permissionless** (beneficiary pokes); Gnosis gas is sub-cent so no keeper economics. Acting players pay their own `submitGuess`/`submitFeedback`.                                                                   |
 
 **Payout rules** (`pot = 2*stake`). A **win** happens only when someone solves or
 the opponent forfeits; if **nobody solves**, it's a draw and stakes are refunded
@@ -133,7 +133,7 @@ partial tallies. **No rake in v1** — pure pot redistribution. (Note: with equa
 stakes, "split" and "refund each" are identical — each gets `stake` back — so the
 contract has just three outcomes: A wins pot, B wins pot, or each reclaims stake.)
 
-**Pull payments.** `settle`/`claimTimeout` are permissionless and a draw pays both
+**Pull payments.** `settle` is permissionless and a draw pays both
 players, so settlement must not push funds (a reverting recipient — common with
 Safe smart wallets — could lock the pot). Instead they credit
 `withdrawable[player] += amount` and flip `status=Settled`; each player then calls
@@ -149,14 +149,10 @@ field + the `pendingGuess` flag distinguishes whose clock is running.
 
 ## 5. Threat model
 
-- **Proof replay across matches** — the current commitment `Poseidon2(secret,
-salt)` does **not** bind `(matchId, player)`. A proof could be replayed in
-  another match reusing the same `(secret, salt, guess)`. **Recommended fix
-  (circuit change):** add `match_binding: pub Field` and fold it into the
-  commitment preimage; the contract forces it to the stored `matchId`/owner, so
-  cross-match replay fails. Public inputs 8 → 9; regenerate the verifier. (The
-  no-change alternative — enforce fresh per-match salt — is unenforceable on-chain
-  since salt is private.) **This is the single most important crypto change.**
+- **Proof replay across matches** — mitigated. The circuit exposes
+  `match_binding: pub Field` and folds it into the commitment preimage; the
+  contract supplies the stored `matchId`, so a proof from one match cannot verify
+  in another even if the same `(secret, salt, guess)` recur.
 - **Malicious `dictRoot`** — do **NOT** accept a caller-supplied root (a player
   could commit a 1-word "dictionary" and trivially solve). Pin `DICT_ROOT` as an
   immutable constant = the Poseidon Merkle root of ANSWERS
@@ -191,7 +187,7 @@ paradigm). New files:
   `IERC20Lift`, immutable `DICT_ROOT`, immutable verifier address (deploy the
   ~17.8KB verifier separately and pass its address, keeping `WordleDuel` under
   EIP-170). Functions: `createMatch`, `joinMatch`, `cancelMatch`, `submitGuess`,
-  `submitFeedback`, `settle`, `claimTimeout`, + views.
+  `submitFeedback`, `settle`, `withdraw`, + views.
 - `contracts/zk/IWordleVerifier.sol` — `verify(bytes, bytes32[]) view returns
 (bool)` so `WordleDuel` depends on an interface, not the generated file.
 - `test/zk/WordleDuel.t.sol` — reuse `MockToken`/`MockERC20Lift` from

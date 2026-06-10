@@ -26,4 +26,13 @@ describe("membershipFor", () => {
   test("rejects a non-answer word", async () => {
     await expect(membershipFor(answers, "zzzzz")).rejects.toThrow();
   });
+
+  test("rejects a drifted answer-list root", async () => {
+    const drifted = [...answers];
+    [drifted[0], drifted[1]] = [drifted[1], drifted[0]];
+
+    await expect(membershipFor(drifted, "react")).rejects.toThrow(
+      /DICT_ROOT mismatch/,
+    );
+  });
 });

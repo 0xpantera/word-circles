@@ -85,12 +85,20 @@ cp target/proof target/public_inputs ../test/zk/fixtures/
 forge test --match-path "test/zk/WordleVerifier.t.sol" --gas-report
 forge build --sizes        # HonkVerifier runtime size vs EIP-170 (24576)
 
-# Proving harness (browser/mobile proxy):
+# Proving harness (browser/mobile proxy for witness/proof generation):
 bun install                # in circuits/
 bun run scripts/build-tree.ts react  # dictionary root + membership path
 bun run scripts/prove.ts             # single-thread WASM (mobile proxy)
 BB_THREADS=0 bun run scripts/prove.ts  # multi-thread comparison
 ```
+
+The harness is intentionally split: `scripts/prove.ts` reuses the precomputed
+commitment and Merkle path from `scripts/build-tree.ts`, so its timing measures
+Noir witness execution plus Barretenberg proof generation. The browser SDK's
+`generateFeedbackProof` path additionally loads the ordered answer list, computes
+or retrieves cached Merkle path material, and computes the Poseidon commitment.
+Real-device testing should report both cold full-SDK wall time and warm cached
+proof time.
 
 Note on public inputs: `target/public_inputs` holds the **9** circuit public
 inputs `[commitment, dictionary_root, match_binding, guess[0..5], feedback]` —
@@ -100,14 +108,14 @@ live **inside the proof**, so `verify(proof, publicInputs)` takes the 9-word arr
 
 ## Metrics (measured — full circuit: scoring + Poseidon2 commitment + match-binding + Merkle membership)
 
-| Metric                        | Value                                     | "Good" ballpark             | Verdict     |
-| ----------------------------- | ----------------------------------------- | --------------------------- | ----------- |
-| Gate count (`circuit_size`)   | **7,372** (was 631 pre-membership)        | low-thousands–low-tens-of-k | ✅ under    |
-| Proof size                    | **7,616 B**                               | ~few KB                     | ✅          |
-| Proving time (WASM, 1-thread) | **~400 ms**                               | ≲ ~10 s (mobile proxy)      | ✅          |
-| Verify gas (Gnosis EVM)       | **~2.27 M** median (was 2.08 M)           | —                           | ⚠️ see note |
-| Verifier deploy gas           | ~3.96 M (one-time)                        | —                           | ✅          |
-| Verifier runtime bytecode     | **17,829 B** (was 17,827; 6,747 B margin) | **< 24576 (EIP-170)**       | ✅ PASS     |
+| Metric                                          | Value                                     | "Good" ballpark             | Verdict     |
+| ----------------------------------------------- | ----------------------------------------- | --------------------------- | ----------- |
+| Gate count (`circuit_size`)                     | **7,372** (was 631 pre-membership)        | low-thousands–low-tens-of-k | ✅ under    |
+| Proof size                                      | **7,616 B**                               | ~few KB                     | ✅          |
+| Proving time (WASM, 1-thread, precomputed path) | **~400 ms**                               | ≲ ~10 s (mobile proxy)      | ✅          |
+| Verify gas (Gnosis EVM)                         | **~2.27 M** median (was 2.08 M)           | —                           | ⚠️ see note |
+| Verifier deploy gas                             | ~3.96 M (one-time)                        | —                           | ✅          |
+| Verifier runtime bytecode                       | **17,829 B** (was 17,827; 6,747 B margin) | **< 24576 (EIP-170)**       | ✅ PASS     |
 
 > **Membership is nearly free on the binding constraints.** Adding the depth-12
 > Poseidon Merkle proof took gate count 631 → 7,297, but the verifier **bytecode

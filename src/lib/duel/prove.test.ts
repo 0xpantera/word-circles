@@ -14,14 +14,16 @@ describe("generateFeedbackProof", () => {
   const answers = loadAnswers();
 
   test("proves crane vs react -> feedback 293, and the proof verifies", async () => {
-    const { proof, publicInputs, feedback } = await generateFeedbackProof({
-      secret: "react",
-      salt: 123456789n,
-      matchBinding: 0x1234567890abcdefn,
-      guess: "crane",
-      answers,
-    });
+    const { proof, proofHex, publicInputs, feedback } =
+      await generateFeedbackProof({
+        secret: "react",
+        salt: 123456789n,
+        matchBinding: 0x1234567890abcdefn,
+        guess: "crane",
+        answers,
+      });
     expect(feedback).toBe(293);
+    expect(proofHex).toMatch(/^0x[0-9a-f]+$/);
     expect(publicInputs).toHaveLength(9);
 
     const api = await Barretenberg.new({ threads: 1 });
