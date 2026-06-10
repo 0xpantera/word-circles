@@ -44,7 +44,13 @@ const publicClient = createPublicClient({ chain: gnosis, transport: http() });
 
 export type MatchStatus = "none" | "open" | "active" | "settled" | "cancelled";
 
-const STATUS: MatchStatus[] = ["none", "open", "active", "settled", "cancelled"];
+const STATUS: MatchStatus[] = [
+  "none",
+  "open",
+  "active",
+  "settled",
+  "cancelled",
+];
 
 export interface ZkTrackState {
   guessCount: number;
@@ -119,40 +125,41 @@ export async function readZkMatch(
   player?: string | null,
 ): Promise<ZkMatchState> {
   if (!ZK_DUEL_ADDRESS) throw new Error("ZK duel address is not configured");
-  const [match, trackA, trackB, token, dictRoot, withdrawable] = await Promise.all([
-    publicClient.readContract({
-      address: ZK_DUEL_ADDRESS,
-      abi: WORDLE_DUEL_ABI,
-      functionName: "getMatch",
-      args: [matchId],
-    }),
-    publicClient.readContract({
-      address: ZK_DUEL_ADDRESS,
-      abi: WORDLE_DUEL_ABI,
-      functionName: "getTrack",
-      args: [matchId, true],
-    }),
-    publicClient.readContract({
-      address: ZK_DUEL_ADDRESS,
-      abi: WORDLE_DUEL_ABI,
-      functionName: "getTrack",
-      args: [matchId, false],
-    }),
-    readZkDuelToken(),
-    publicClient.readContract({
-      address: ZK_DUEL_ADDRESS,
-      abi: WORDLE_DUEL_ABI,
-      functionName: "DICT_ROOT",
-    }),
-    player
-      ? publicClient.readContract({
-          address: ZK_DUEL_ADDRESS,
-          abi: WORDLE_DUEL_ABI,
-          functionName: "withdrawable",
-          args: [getAddress(player)],
-        })
-      : Promise.resolve(0n),
-  ]);
+  const [match, trackA, trackB, token, dictRoot, withdrawable] =
+    await Promise.all([
+      publicClient.readContract({
+        address: ZK_DUEL_ADDRESS,
+        abi: WORDLE_DUEL_ABI,
+        functionName: "getMatch",
+        args: [matchId],
+      }),
+      publicClient.readContract({
+        address: ZK_DUEL_ADDRESS,
+        abi: WORDLE_DUEL_ABI,
+        functionName: "getTrack",
+        args: [matchId, true],
+      }),
+      publicClient.readContract({
+        address: ZK_DUEL_ADDRESS,
+        abi: WORDLE_DUEL_ABI,
+        functionName: "getTrack",
+        args: [matchId, false],
+      }),
+      readZkDuelToken(),
+      publicClient.readContract({
+        address: ZK_DUEL_ADDRESS,
+        abi: WORDLE_DUEL_ABI,
+        functionName: "DICT_ROOT",
+      }),
+      player
+        ? publicClient.readContract({
+            address: ZK_DUEL_ADDRESS,
+            abi: WORDLE_DUEL_ABI,
+            functionName: "withdrawable",
+            args: [getAddress(player)],
+          })
+        : Promise.resolve(0n),
+    ]);
 
   return {
     matchId,
@@ -194,7 +201,10 @@ export function secretStorageKey(matchId: Hex, player: string): string {
 }
 
 export function saveZkDuelSecret(player: string, value: StoredZkDuelSecret) {
-  localStorage.setItem(secretStorageKey(value.matchId, player), JSON.stringify(value));
+  localStorage.setItem(
+    secretStorageKey(value.matchId, player),
+    JSON.stringify(value),
+  );
   localStorage.setItem("wordcircle-zk-duel:last", value.matchId);
 }
 
@@ -215,14 +225,20 @@ export function loadLastZkDuel(): Hex | null {
   return raw && /^0x[0-9a-fA-F]{64}$/.test(raw) ? (raw as Hex) : null;
 }
 
-export function myGuessTrack(state: ZkMatchState, player: string): ZkTrackState | null {
+export function myGuessTrack(
+  state: ZkMatchState,
+  player: string,
+): ZkTrackState | null {
   const p = player.toLowerCase();
   if (state.playerA.toLowerCase() === p) return state.trackA;
   if (state.playerB.toLowerCase() === p) return state.trackB;
   return null;
 }
 
-export function myAnswerTrack(state: ZkMatchState, player: string): ZkTrackState | null {
+export function myAnswerTrack(
+  state: ZkMatchState,
+  player: string,
+): ZkTrackState | null {
   const p = player.toLowerCase();
   if (state.playerA.toLowerCase() === p) return state.trackB;
   if (state.playerB.toLowerCase() === p) return state.trackA;
@@ -234,7 +250,14 @@ export function isParticipant(state: ZkMatchState, player: string): boolean {
   return state.playerA.toLowerCase() === p || state.playerB.toLowerCase() === p;
 }
 
-export { encodeCancelMatch, encodeCreateMatch, encodeJoinMatch, encodeSettle, encodeSubmitGuess, encodeWithdraw };
+export {
+  encodeCancelMatch,
+  encodeCreateMatch,
+  encodeJoinMatch,
+  encodeSettle,
+  encodeSubmitGuess,
+  encodeWithdraw,
+};
 
 function normalizeTrack(track: readonly unknown[]): ZkTrackState {
   const guessLetters = track[7] as readonly number[];

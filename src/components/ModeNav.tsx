@@ -19,7 +19,8 @@ export default function ModeNav() {
   // PvP hidden until the backend reports it live — no nav at all, so the app
   // looks exactly like the daily-only version. Stays hidden while loading
   // (undefined) so we never flash a tab the backend can't serve.
-  if (!pvpEnabled && !(FRONTEND_ZK_DUEL_ENABLED && ZK_DUEL_ADDRESS)) return null;
+  if (!pvpEnabled && !(FRONTEND_ZK_DUEL_ENABLED && ZK_DUEL_ADDRESS))
+    return null;
   const tabs = [
     ...(pvpEnabled ? TABS : [TABS[0]]),
     ...(FRONTEND_ZK_DUEL_ENABLED && ZK_DUEL_ADDRESS ? [ZK_DUEL_TAB] : []),

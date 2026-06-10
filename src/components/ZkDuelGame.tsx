@@ -84,7 +84,9 @@ export default function ZkDuelGame() {
     const unsubscribe = subscribeWallet(setWalletAddress);
     /* eslint-disable react-hooks/set-state-in-effect */
     if (typeof window !== "undefined") {
-      const requested = new URLSearchParams(window.location.search).get("match");
+      const requested = new URLSearchParams(window.location.search).get(
+        "match",
+      );
       const restored = requested ?? loadLastZkDuel();
       if (restored && /^0x[0-9a-fA-F]{64}$/.test(restored)) {
         setMatchId(restored as Hex);
@@ -165,7 +167,11 @@ export default function ZkDuelGame() {
       const nonceValue = nonce ? BigInt(nonce) : newNonce();
       const saltValue = salt ? BigInt(salt) : newSalt();
       const id = computeCreatorMatchId(walletAddress, nonceValue);
-      const commitment = await commitWord(cleanSecret, saltValue, matchBinding(id));
+      const commitment = await commitWord(
+        cleanSecret,
+        saltValue,
+        matchBinding(id),
+      );
       const token = await readZkDuelToken();
       await joinPvpGame({
         escrow: ZK_DUEL_ADDRESS,
@@ -219,7 +225,11 @@ export default function ZkDuelGame() {
         return;
       }
       const saltValue = salt ? BigInt(salt) : newSalt();
-      const commitment = await commitWord(cleanSecret, saltValue, matchBinding(id));
+      const commitment = await commitWord(
+        cleanSecret,
+        saltValue,
+        matchBinding(id),
+      );
       await joinPvpGame({
         escrow: ZK_DUEL_ADDRESS,
         token: before.token,
@@ -258,7 +268,10 @@ export default function ZkDuelGame() {
     }
     setBusy("guessing");
     try {
-      await submitGameResult(ZK_DUEL_ADDRESS, encodeSubmitGuess(matchId, cleanGuess));
+      await submitGameResult(
+        ZK_DUEL_ADDRESS,
+        encodeSubmitGuess(matchId, cleanGuess),
+      );
       setGuess("");
       setToast("Guess submitted on-chain. Waiting for feedback proof…");
       await refreshState();
@@ -439,7 +452,9 @@ export default function ZkDuelGame() {
                 disabled={busy !== null}
                 onClick={makeCreate}
               >
-                {busy === "creating" ? "Confirm approve + create…" : "Create ZK duel"}
+                {busy === "creating"
+                  ? "Confirm approve + create…"
+                  : "Create ZK duel"}
               </button>
             </>
           ) : (
@@ -457,7 +472,9 @@ export default function ZkDuelGame() {
                 disabled={busy !== null}
                 onClick={makeJoin}
               >
-                {busy === "joining" ? "Confirm approve + join…" : "Join ZK duel"}
+                {busy === "joining"
+                  ? "Confirm approve + join…"
+                  : "Join ZK duel"}
               </button>
             </>
           )}
@@ -542,32 +559,41 @@ function ActiveDuel(props: {
             <Stat
               label="Player B"
               value={
-                state.playerB === ZERO_ADDRESS ? "waiting" : shortAddress(state.playerB)
+                state.playerB === ZERO_ADDRESS
+                  ? "waiting"
+                  : shortAddress(state.playerB)
               }
             />
           </div>
         ) : (
-          <p className="mt-3 text-muted animate-pulse">Reading contract state…</p>
+          <p className="mt-3 text-muted animate-pulse">
+            Reading contract state…
+          </p>
         )}
       </div>
 
       {state?.status === "open" && (
         <div className="rounded-xl border border-border bg-surface-2 p-3 text-sm text-muted">
-          Waiting for an opponent to join. Your secret and salt are stored only in
-          this browser so you can answer their guesses later.
+          Waiting for an opponent to join. Your secret and salt are stored only
+          in this browser so you can answer their guesses later.
         </div>
       )}
 
       {state?.status === "active" && (
         <div className="grid gap-4 sm:grid-cols-2">
           <TrackCard title="Your guesses" track={props.myTrack} />
-          <TrackCard title="Opponent guesses to answer" track={props.answerTrack} />
+          <TrackCard
+            title="Opponent guesses to answer"
+            track={props.answerTrack}
+          />
         </div>
       )}
 
       {pendingForMe && (
         <div className="rounded-2xl border border-present bg-surface/80 p-4 text-left shadow-sm">
-          <p className="font-bold">Pending opponent guess: {props.answerTrack?.guessWord.toUpperCase()}</p>
+          <p className="font-bold">
+            Pending opponent guess: {props.answerTrack?.guessWord.toUpperCase()}
+          </p>
           <p className="text-sm text-muted">
             Generate the local Noir/UltraHonk proof and submit it to
             WordleDuel.submitFeedback.
@@ -599,7 +625,9 @@ function ActiveDuel(props: {
               className="input"
               value={props.guess}
               maxLength={5}
-              onChange={(e) => props.onGuessChange(e.target.value.toLowerCase())}
+              onChange={(e) =>
+                props.onGuessChange(e.target.value.toLowerCase())
+              }
               placeholder="react"
             />
           </FormLabel>
@@ -620,7 +648,11 @@ function ActiveDuel(props: {
       )}
 
       <div className="flex flex-wrap justify-center gap-2">
-        <button className="small-button" disabled={props.busy !== null} onClick={props.onSettle}>
+        <button
+          className="small-button"
+          disabled={props.busy !== null}
+          onClick={props.onSettle}
+        >
           {props.busy === "settling" ? "Settling…" : "Settle"}
         </button>
         <button
@@ -648,9 +680,16 @@ function TrackCard(props: { title: string; track: ZkTrackState | null }) {
       {track ? (
         <div className="mt-2 space-y-1 text-sm text-muted">
           <p>Guesses: {track.guessCount}/6</p>
-          <p>Pending: {track.pendingGuess ? track.guessWord.toUpperCase() : "none"}</p>
-          <p>Solved: {track.solved ? `yes, at ${track.solvedAtGuess}` : "no"}</p>
-          <p>Tiebreak tiles: {track.greens} green / {track.oranges} orange</p>
+          <p>
+            Pending:{" "}
+            {track.pendingGuess ? track.guessWord.toUpperCase() : "none"}
+          </p>
+          <p>
+            Solved: {track.solved ? `yes, at ${track.solvedAtGuess}` : "no"}
+          </p>
+          <p>
+            Tiebreak tiles: {track.greens} green / {track.oranges} orange
+          </p>
         </div>
       ) : (
         <p className="mt-2 text-sm text-muted">Not seated in this match.</p>
@@ -678,7 +717,11 @@ function Stat(props: { label: string; value: string }) {
 }
 
 function Screen(props: { children: React.ReactNode }) {
-  return <div className="flex flex-col items-center gap-4 px-4 text-center">{props.children}</div>;
+  return (
+    <div className="flex flex-col items-center gap-4 px-4 text-center">
+      {props.children}
+    </div>
+  );
 }
 
 function normalizeWord(value: string): string | null {
