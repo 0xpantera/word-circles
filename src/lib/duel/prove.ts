@@ -7,6 +7,7 @@
  */
 import { Barretenberg, UltraHonkBackend } from "@aztec/bb.js";
 import { Noir } from "@noir-lang/noir_js";
+import { bytesToHex, type Hex } from "viem";
 import circuit from "../../../circuits/artifacts/wordle_feedback.json";
 import { wordToLetters } from "./encoding";
 import { commitWord } from "./commitment";
@@ -29,6 +30,8 @@ export interface ProveParams {
 export interface ProveResult {
   /** UltraHonk proof bytes for submitFeedback. */
   proof: Uint8Array;
+  /** Same proof as 0x-prefixed hex, ready for ABI encoding. */
+  proofHex: Hex;
   /** The 9 public inputs (hex), in the order the verifier/contract expects. */
   publicInputs: string[];
   /** Packed base-4 feedback (682 = solved). */
@@ -69,6 +72,7 @@ export async function generateFeedbackProof(
     });
     return {
       proof,
+      proofHex: bytesToHex(proof),
       publicInputs,
       feedback: Number(BigInt(returnValue as string)),
     };

@@ -22,6 +22,9 @@ export const WORD_LENGTH = 5;
 export const MAX_GUESSES = 6;
 /** Packed feedback meaning all five tiles correct: 2·(1+4+16+64+256). */
 export const FEEDBACK_SOLVED = 682;
+/** Poseidon Merkle root of the ordered public ANSWERS list pinned on-chain. */
+export const DICT_ROOT =
+  "0x0984b03ac65fe9e4710ce7fb30f53d292b0d03f812b247ef32764d6018655f87";
 
 /** bn254 scalar field is ~2^254; mask to 253 bits to guarantee a field element. */
 export const FIELD_MASK = (1n << 253n) - 1n;

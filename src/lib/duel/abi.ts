@@ -2,7 +2,16 @@
  * viem ABI + call encoders for WordleDuel. Pure (viem only).
  * Mirrors the external surface of contracts/zk/WordleDuel.sol.
  */
-import { type Address, type Hex, encodeFunctionData } from "viem";
+import { type Address, type Hex, bytesToHex, encodeFunctionData } from "viem";
+import { WORD_LENGTH, wordToLetters } from "./encoding";
+
+export type GuessTuple = readonly [number, number, number, number, number];
+
+export interface FeedbackProofLike {
+  feedback: number;
+  proof?: Uint8Array;
+  proofHex?: Hex;
+}
 
 export const WORDLE_DUEL_ABI = [
   {
@@ -97,15 +106,12 @@ export const encodeJoinMatch = (matchId: Hex, commitmentB: Hex): Hex =>
 
 export const encodeSubmitGuess = (
   matchId: Hex,
-  guess: readonly number[],
+  guess: string | readonly number[],
 ): Hex =>
   encodeFunctionData({
     abi: WORDLE_DUEL_ABI,
     functionName: "submitGuess",
-    args: [
-      matchId,
-      guess as unknown as readonly [number, number, number, number, number],
-    ],
+    args: [matchId, normalizeGuess(guess)],
   });
 
 export const encodeSubmitFeedback = (
@@ -118,6 +124,16 @@ export const encodeSubmitFeedback = (
     functionName: "submitFeedback",
     args: [matchId, feedback, proof],
   });
+
+export const encodeSubmitFeedbackFromProof = (
+  matchId: Hex,
+  result: FeedbackProofLike,
+): Hex => {
+  const proof =
+    result.proofHex ?? (result.proof ? bytesToHex(result.proof) : undefined);
+  if (!proof) throw new Error("proof result is missing proof/proofHex");
+  return encodeSubmitFeedback(matchId, result.feedback, proof);
+};
 
 export const encodeSettle = (matchId: Hex): Hex =>
   encodeFunctionData({
@@ -139,5 +155,18 @@ export const encodeCancelMatch = (matchId: Hex): Hex =>
     functionName: "cancelMatch",
     args: [matchId],
   });
+
+function normalizeGuess(guess: string | readonly number[]): GuessTuple {
+  const letters = typeof guess === "string" ? wordToLetters(guess) : [...guess];
+  if (letters.length !== WORD_LENGTH) {
+    throw new Error(`guess must contain exactly ${WORD_LENGTH} letters`);
+  }
+  for (const letter of letters) {
+    if (!Number.isInteger(letter) || letter < 0 || letter >= 26) {
+      throw new Error(`invalid guess letter: ${letter}`);
+    }
+  }
+  return letters as unknown as GuessTuple;
+}
 
 export type { Address };

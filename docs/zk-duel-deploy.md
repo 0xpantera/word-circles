@@ -92,13 +92,22 @@ The duel client must load this exact list (order matters — it defines leaf
 indices and the `DICT_ROOT`) and pass it to `membershipFor` / `generateFeedbackProof`.
 Do **not** reuse `src/lib/words.server.ts` directly: it is server-only to keep the
 daily game's answer non-trivial to compute client-side. Serve the duel answer list
-via a dedicated route or bundle a public copy, and guard it with a test that the
-recomputed root equals `DICT_ROOT` (mirrors `src/lib/duel/tree.test.ts`).
+via a dedicated route or bundle a public copy.
+
+The SDK guards this at runtime: `membershipFor` / `generateFeedbackProof` compare
+the recomputed Poseidon Merkle root to the pinned `DICT_ROOT` and throw before
+Noir witness/proof generation if the list is drifted or reordered. Keep the test
+that the recomputed root equals `DICT_ROOT` (mirrors `src/lib/duel/tree.test.ts`).
+The SDK also caches the built tree by ordered answer list, so repeated feedback
+proofs in one session reuse the Poseidon levels instead of rebuilding the full
+4096-leaf tree each time.
 
 ## 6. 🧑 Real-device mobile proving (the last feasibility gate)
 
-Desktop single-thread WASM proving is ~400 ms (see `circuits/README.md`); the open
-question is real phones. Test on at least:
+Desktop single-thread WASM proving is ~400 ms for the precomputed harness path
+(see `circuits/README.md`); the full SDK path also loads the answer list, derives
+or reuses Merkle path material, computes the commitment, executes Noir, and
+generates the proof. The open question is real phones. Test on at least:
 
 - **iOS Safari** (the strict WASM/memory case)
 - **Android Chrome / WebView** (the Circles miniapp host)
@@ -106,11 +115,11 @@ question is real phones. Test on at least:
 Procedure: load a page that lazily `import("@/lib/duel/prove")` and times
 `generateFeedbackProof` for one guess. Record:
 
-| Device / browser         | proving time | peak memory | pass?   |
-| ------------------------ | ------------ | ----------- | ------- |
-| iPhone (Safari)          |              |             | ≲ ~10 s |
-| Android (Chrome/WebView) |              |             | ≲ ~10 s |
-| low-end Android          |              |             | ≲ ~10 s |
+| Device / browser         | answer load | first tree/path | cached tree/path | commitment | Noir execute | bb prove | total cold | total warm | peak memory | pass?   |
+| ------------------------ | ----------- | --------------- | ---------------- | ---------- | ------------ | -------- | ---------- | ---------- | ----------- | ------- |
+| iPhone (Safari)          |             |                 |                  |            |              |          |            |            |             | ≲ ~10 s |
+| Android (Chrome/WebView) |             |                 |                  |            |              |          |            |            |             | ≲ ~10 s |
+| low-end Android          |             |                 |                  |            |              |          |            |            |             | ≲ ~10 s |
 
 Watch for: WASM out-of-memory on low-end devices, multi-threading (cross-origin
 isolation / COOP-COEP headers needed for bb.js threads — single-thread avoids
